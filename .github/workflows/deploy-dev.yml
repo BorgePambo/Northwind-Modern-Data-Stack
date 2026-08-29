@@ -1,0 +1,107 @@
+name: Deploy - DEV Environment
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+env:
+  DBT_PROFILES_DIR: airflow_dbt/include/northwind_dbt
+  DBT_PROJECT_DIR: airflow_dbt/include/northwind_dbt
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dev
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install dbt-core==1.12.0
+          pip install dbt-databricks==1.10.0
+          pip install -r airflow_dbt/requirements.txt
+
+      - name: Create dbt profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<EOF
+          northwind_dbt:
+            outputs:
+              dev:
+                type: databricks
+                host: ${{ secrets.DATABRICKS_HOST }}
+                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
+                token: ${{ secrets.DATABRICKS_TOKEN }}
+                catalog: ${{ secrets.DATABRICKS_CATALOG }}
+                schema: dbt_northwind_dev
+                threads: 4
+                timeout_seconds: 300
+            target: dev
+          EOF
+
+      - name: dbt debug
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt debug
+
+      - name: dbt dependencies
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt deps
+
+      - name: dbt parse
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt parse
+
+      - name: dbt build
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt build --exclude config.require_resource_names_without_spaces=False
+
+      - name: dbt test
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt test
+        continue-on-error: true
+
+      - name: dbt docs generate
+        run: |
+          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt docs generate
+        continue-on-error: true
+
+      - name: Upload dbt artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-artifacts-dev-${{ github.run_id }}
+          path: ${{ env.DBT_PROJECT_DIR }}/target
+          retention-days: 7
+
+      - name: Notify Deployment Success
+        if: success()
+        run: |
+          echo "✅ DEV deployment completed successfully!"
+          echo "Environment: DEV"
+          echo "Schema: dbt_northwind_dev"
+          echo "Commit: ${{ github.sha }}"
+
+      - name: Notify Deployment Failure
+        if: failure()
+        run: |
+          echo "❌ DEV deployment failed!"
+          echo "Check the logs above for details."
+          exit 1
