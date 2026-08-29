@@ -1,4 +1,5 @@
 # .github/workflows/deploy.yml
+<<<<<<< ours
 # Pipeline de Deploy para DEV/PROD
 # Executa automaticamente após push para develop ou main.
 # Também pode ser disparado manualmente via workflow_dispatch.
@@ -16,6 +17,30 @@
 #   bronze  → seeds
 #   silver  → staging + intermediate + snapshots
 #   gold    → marts
+=======
+# Pipeline de Deploy para os ambientes dev e prod.
+#
+# Triggers automáticos:
+#   → push em develop  → deploy no target dev  (schema: dbt_dev)
+#   → push em main     → deploy no target prod (schemas: bronze / silver / gold)
+#
+# Trigger manual (workflow_dispatch):
+#   → permite escolher o target (dev ou prod) independente da branch
+#
+# Fluxo de execução:
+#   1. dbt deps      → instala pacotes
+#   2. dbt parse     → valida sintaxe antes de executar
+#   3. dbt seed      → carrega/atualiza seeds (bronze)
+#   4. dbt snapshot  → SCD2 de customers (silver) — antes do run
+#   5. dbt run       → executa modelos staging + intermediate + marts
+#   6. dbt test      → testes genéricos + singulares
+#
+# Secrets necessários no GitHub (Settings → Secrets → Actions):
+#   DATABRICKS_HOST       → https://adb-xxx.azuredatabricks.net
+#   DATABRICKS_TOKEN      → Personal Access Token (PAT)
+#   DATABRICKS_HTTP_PATH  → /sql/1.0/warehouses/<id>
+#   DATABRICKS_CATALOG    → dbt_northwind
+>>>>>>> theirs
 
 name: dbt Deploy
 
@@ -38,14 +63,17 @@ on:
       target:
         description: 'Ambiente do deploy'
         required: true
-        default: 'prod'
+        default: 'dev'
         type: choice
         options:
-          - prod
           - dev
+<<<<<<< ours
 
+=======
+          - prod
+>>>>>>> theirs
       select:
-        description: 'Seletor de modelos dbt (ex: +fct_order_items)'
+        description: 'Seletor de modelos dbt (ex: +fct_order_items). Deixe vazio para todos.'
         required: false
         default: ''
 
@@ -55,11 +83,61 @@ on:
         default: false
         type: boolean
 
+# Cancela runs anteriores da mesma branch quando um novo push chega
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # deploy não cancela — aguarda o anterior terminar
+
+env:
+  DBT_PROJECT_DIR: airflow_dbt/include/northwind_dbt
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve o target dbt baseado na branch ou input manual
+  # ---------------------------------------------------------------------------
+  resolve-target:
+    name: Resolve deploy target
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.set-target.outputs.target }}
+      environment: ${{ steps.set-target.outputs.environment }}
+    steps:
+      - name: Set target based on branch or input
+        id: set-target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ github.event.inputs.target }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TARGET="prod"
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            TARGET="dev"
+          else
+            echo "Branch não mapeada para nenhum target. Abortando."
+            exit 1
+          fi
+
+          echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
+
+          if [ "$TARGET" = "prod" ]; then
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=development" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Resolved target: ${TARGET}"
+
+  # ---------------------------------------------------------------------------
+  # Job principal de deploy
+  # ---------------------------------------------------------------------------
   dbt-deploy:
-    name: dbt Deploy to Databricks
+    name: dbt Deploy (${{ needs.resolve-target.outputs.target }})
+    needs: resolve-target
     runs-on: ubuntu-latest
     timeout-minutes: 60
+<<<<<<< ours
+=======
+    environment: ${{ needs.resolve-target.outputs.environment }}
+>>>>>>> theirs
 
     steps:
 
@@ -84,9 +162,10 @@ jobs:
       - name: Install dbt-databricks
         run: |
           pip install --upgrade pip
-          pip install dbt-databricks==1.8.*
+          pip install "dbt-databricks==1.8.*"
 
       # -----------------------------------------------------------------------
+<<<<<<< ours
       # 4. Definir ambiente
       # -----------------------------------------------------------------------
       - name: Set deployment target
@@ -125,21 +204,53 @@ jobs:
                 schema: bronze
                 threads: 8
 
+=======
+      # 4. Gerar profiles.yml dinamicamente com ambos os targets
+      #    → dev:  schema dbt_dev, 4 threads
+      #    → prod: schema bronze (generate_schema_name cuida de silver/gold),
+      #            8 threads
+      # -----------------------------------------------------------------------
+      - name: Generate profiles.yml
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
+          DEPLOY_TARGET: ${{ needs.resolve-target.outputs.target }}
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<EOF
+          northwind_dbt:
+            target: ${DEPLOY_TARGET}
+            outputs:
+              dev:
+                type: databricks
+                host: "${DATABRICKS_HOST}"
+                http_path: "${DATABRICKS_HTTP_PATH}"
+                token: "${DATABRICKS_TOKEN}"
+                catalog: "${DATABRICKS_CATALOG}"
+                schema: dbt_dev
+                threads: 4
+>>>>>>> theirs
               prod:
                 type: databricks
-                host: ${{ secrets.DATABRICKS_HOST }}
-                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
-                token: ${{ secrets.DATABRICKS_TOKEN }}
-                catalog: ${{ secrets.DATABRICKS_CATALOG }}
+                host: "${DATABRICKS_HOST}"
+                http_path: "${DATABRICKS_HTTP_PATH}"
+                token: "${DATABRICKS_TOKEN}"
+                catalog: "${DATABRICKS_CATALOG}"
                 schema: bronze
                 threads: 8
           EOF
+
+          echo "DEPLOY_TARGET=${DEPLOY_TARGET}" >> "$GITHUB_ENV"
 
       # -----------------------------------------------------------------------
       # 6. dbt deps
       # -----------------------------------------------------------------------
       - name: dbt deps
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: dbt deps
+<<<<<<< ours
         working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
@@ -174,15 +285,51 @@ jobs:
           TARGET="${{ steps.target.outputs.target }}"
 
           CMD="dbt run --target $TARGET"
+=======
 
-          if [ -n "$SELECT" ]; then
-            CMD="$CMD --select $SELECT"
+      # -----------------------------------------------------------------------
+      # 6. dbt parse — valida antes de executar
+      # -----------------------------------------------------------------------
+      - name: dbt parse
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: dbt parse --target "$DEPLOY_TARGET"
+
+      # -----------------------------------------------------------------------
+      # 7. dbt seed — carrega seeds no schema bronze
+      # -----------------------------------------------------------------------
+      - name: dbt seed
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: dbt seed --target "$DEPLOY_TARGET"
+
+      # -----------------------------------------------------------------------
+      # 8. dbt snapshot — SCD2 de customers (deve rodar antes do run)
+      # -----------------------------------------------------------------------
+      - name: dbt snapshot
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: dbt snapshot --target "$DEPLOY_TARGET"
+
+      # -----------------------------------------------------------------------
+      # 9. dbt run — executa os modelos
+      #    Suporta --select e --full-refresh via workflow_dispatch
+      # -----------------------------------------------------------------------
+      - name: dbt run
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        env:
+          DBT_SELECT: ${{ github.event.inputs.select }}
+          DBT_FULL_REFRESH: ${{ github.event.inputs.full_refresh }}
+        run: |
+          CMD="dbt run --target ${DEPLOY_TARGET}"
+>>>>>>> theirs
+
+          if [ -n "${DBT_SELECT}" ]; then
+            CMD="${CMD} --select ${DBT_SELECT}"
           fi
 
-          if [ "$FULL_REFRESH" = "true" ]; then
-            CMD="$CMD --full-refresh"
+          if [ "${DBT_FULL_REFRESH}" = "true" ]; then
+            CMD="${CMD} --full-refresh"
           fi
 
+<<<<<<< ours
           echo "Executing: $CMD"
           eval "$CMD"
         working-directory: airflow_dbt/include/northwind_dbt
@@ -196,22 +343,50 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 12. Upload manifest
+=======
+          echo "Executing: ${CMD}"
+          ${CMD}
+
+      # -----------------------------------------------------------------------
+      # 10. dbt test — testes genéricos e singulares
+      # -----------------------------------------------------------------------
+      - name: dbt test
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: dbt test --target "$DEPLOY_TARGET"
+
+      # -----------------------------------------------------------------------
+      # 11. Upload do manifest como artefato
+>>>>>>> theirs
       # -----------------------------------------------------------------------
       - name: Upload dbt manifest
         uses: actions/upload-artifact@v4
         if: success()
         with:
+<<<<<<< ours
           name: dbt-manifest-${{ steps.target.outputs.target }}-${{ github.sha }}
           path: airflow_dbt/include/northwind_dbt/target/manifest.json
           retention-days: 30
 
       # -----------------------------------------------------------------------
       # 13. Notificação de falha
+=======
+          name: dbt-manifest-${{ needs.resolve-target.outputs.target }}-${{ github.sha }}
+          path: ${{ env.DBT_PROJECT_DIR }}/target/manifest.json
+          retention-days: 30
+
       # -----------------------------------------------------------------------
-      - name: Notify on failure
+      # 12. Log de falha (substitua por notificação Slack se necessário)
+>>>>>>> theirs
+      # -----------------------------------------------------------------------
+      - name: Log failure details
         if: failure()
         run: |
+<<<<<<< ours
           echo "Deploy failed."
           echo "Environment: ${{ steps.target.outputs.target }}"
           echo "Commit: ${{ github.sha }}"
           echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+=======
+          echo "::error::Deploy falhou para o target '${DEPLOY_TARGET}' no commit ${{ github.sha }}"
+          echo "Logs em: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+>>>>>>> theirs

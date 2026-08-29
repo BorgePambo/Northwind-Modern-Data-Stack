@@ -1,3 +1,24 @@
+<<<<<<< ours
+=======
+# .github/workflows/ci.yml
+# Pipeline de CI — executa em Pull Requests para develop e main.
+#
+# Fluxo:
+#   1. dbt deps   → instala pacotes (dbt-utils etc.)
+#   2. dbt parse  → valida sintaxe e compilação dos modelos sem conectar
+#   3. dbt build  → seeds + run + test em schema de CI isolado
+#
+# Schema de CI: ci_pr_<PR_NUMBER>  (ex: ci_pr_42)
+#   → criado automaticamente pelo dbt antes dos testes
+#   → removido pelo step de cleanup ao final (mesmo em falha)
+#
+# Secrets necessários no GitHub (Settings → Secrets → Actions):
+#   DATABRICKS_HOST       → https://adb-xxx.azuredatabricks.net
+#   DATABRICKS_TOKEN      → Personal Access Token (PAT)
+#   DATABRICKS_HTTP_PATH  → /sql/1.0/warehouses/<id>
+#   DATABRICKS_CATALOG    → dbt_northwind
+
+>>>>>>> theirs
 name: dbt CI
 
 on:
@@ -13,8 +34,21 @@ on:
       - 'airflow_dbt/include/northwind_dbt/tests/**'
       - 'airflow_dbt/include/northwind_dbt/dbt_project.yml'
       - 'airflow_dbt/include/northwind_dbt/packages.yml'
+<<<<<<< ours
 
   workflow_dispatch:
+=======
+
+  workflow_dispatch:
+
+# Cancela runs anteriores do mesmo PR quando um novo commit é enviado
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DBT_PROJECT_DIR: airflow_dbt/include/northwind_dbt
+>>>>>>> theirs
 
 jobs:
   dbt-ci:
@@ -33,34 +67,76 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+<<<<<<< ours
+=======
+      # -----------------------------------------------------------------------
+      # 3. Instalar dbt-databricks (versão fixada para reproducibilidade)
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: Install dbt-databricks
         run: |
           pip install --upgrade pip
-          pip install dbt-databricks==1.8.*
+          pip install "dbt-databricks==1.8.*"
 
+<<<<<<< ours
+=======
+      # -----------------------------------------------------------------------
+      # 4. Gerar profiles.yml de CI dinamicamente
+      #    → gravado em ~/.dbt/profiles.yml (padrão do dbt, fora do repo)
+      #    → schema isolado por número de PR: ci_pr_<PR_NUMBER>
+      #    → para workflow_dispatch (sem PR number), usa ci_manual
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: Generate profiles.yml for CI
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
         run: |
+          PR_NUMBER="${{ github.event.number }}"
+          CI_SCHEMA="ci_pr_${PR_NUMBER:-manual}"
+
           mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << EOF
+          cat > ~/.dbt/profiles.yml <<EOF
           northwind_dbt:
             target: ci
             outputs:
               ci:
                 type: databricks
-                host: ${{ secrets.DATABRICKS_HOST }}
-                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
-                token: ${{ secrets.DATABRICKS_TOKEN }}
-                catalog: ${{ secrets.DATABRICKS_CATALOG }}
-                schema: ci_pr_${{ github.event.number }}
+                host: "${DATABRICKS_HOST}"
+                http_path: "${DATABRICKS_HTTP_PATH}"
+                token: "${DATABRICKS_TOKEN}"
+                catalog: "${DATABRICKS_CATALOG}"
+                schema: "${CI_SCHEMA}"
                 threads: 4
           EOF
 
+<<<<<<< ours
+=======
+          echo "CI_SCHEMA=${CI_SCHEMA}" >> "$GITHUB_ENV"
+
+      # -----------------------------------------------------------------------
+      # 5. dbt deps — instala pacotes declarados em packages.yml
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: dbt deps
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: dbt deps
+<<<<<<< ours
         working-directory: airflow_dbt/include/northwind_dbt
 
+=======
+
+      # -----------------------------------------------------------------------
+      # 6. dbt parse — valida sintaxe e compila modelos sem executar queries
+      #    Gera manifest.json em target/ para uso no build
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: dbt parse
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: dbt parse
+<<<<<<< ours
         working-directory: airflow_dbt/include/northwind_dbt
 
       - name: dbt build
@@ -70,18 +146,50 @@ jobs:
             --fail-fast
         working-directory: airflow_dbt/include/northwind_dbt
 
+=======
+
+      # -----------------------------------------------------------------------
+      # 7. dbt build — seeds + run + test em schema de CI isolado
+      #    Executa todos os modelos (sem slim CI por ser o primeiro run)
+      # -----------------------------------------------------------------------
+      - name: dbt build
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: dbt build --target ci --fail-fast
+
+      # -----------------------------------------------------------------------
+      # 8. Upload do manifest.json como artefato
+      #    Útil para debug e futura implementação de slim CI
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: Upload dbt manifest
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dbt-manifest-pr-${{ github.event.number }}
+<<<<<<< ours
           path: airflow_dbt/include/northwind_dbt/target/manifest.json
           retention-days: 7
 
+=======
+          path: ${{ env.DBT_PROJECT_DIR }}/target/manifest.json
+          retention-days: 7
+
+      # -----------------------------------------------------------------------
+      # 9. Cleanup do schema de CI
+      #    Executa sempre (mesmo em falha) para não acumular schemas no catalog
+      # -----------------------------------------------------------------------
+>>>>>>> theirs
       - name: Cleanup CI schema
         if: always()
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: |
           dbt run-operation drop_schema \
+<<<<<<< ours
             --args "{'schema': 'ci_pr_${{ github.event.number }}'}" \
             --target ci
         working-directory: airflow_dbt/include/northwind_dbt
+=======
+            --args "{\"schema\": \"${CI_SCHEMA}\"}" \
+            --target ci \
+          || echo "Cleanup skipped or schema already removed"
+>>>>>>> theirs
