@@ -1,4 +1,3 @@
-```yaml
 name: CI - dbt Databricks
 
 on:
@@ -54,4 +53,3 @@ jobs:
 
       - name: Build dbt project
         run: dbt build
-```
