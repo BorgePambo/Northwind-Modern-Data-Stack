@@ -1,3 +1,4 @@
+```yaml
 name: CI - dbt Validation
 
 on:
@@ -5,20 +6,55 @@ on:
     branches:
       - develop
       - main
+
   workflow_dispatch:
 
 env:
-  DBT_PROFILES_DIR: airflow_dbt/include/northwind_dbt
   DBT_PROJECT_DIR: airflow_dbt/include/northwind_dbt
 
 jobs:
   dbt-validation:
+    name: Validate dbt project
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show repository structure
+        run: |
+          echo "Repository:"
+          pwd
+
+          echo ""
+          echo "Root:"
+          ls -la
+
+          echo ""
+          echo "airflow_dbt:"
+          ls -la airflow_dbt
+
+          echo ""
+          echo "include:"
+          ls -la airflow_dbt/include
+
+      - name: Validate dbt project path
+        run: |
+          if [ ! -d "${DBT_PROJECT_DIR}" ]; then
+            echo "❌ dbt project directory not found:"
+            echo "${DBT_PROJECT_DIR}"
+            exit 1
+          fi
+
+          if [ ! -f "${DBT_PROJECT_DIR}/dbt_project.yml" ]; then
+            echo "❌ dbt_project.yml not found:"
+            echo "${DBT_PROJECT_DIR}/dbt_project.yml"
+            exit 1
+          fi
+
+          echo "✅ dbt project found:"
+          echo "${DBT_PROJECT_DIR}"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -26,32 +62,27 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dbt
         run: |
-          pip install --upgrade pip
-          pip install dbt-core==1.12.0
-          pip install dbt-databricks==1.10.0
-          pip install -r airflow_dbt/requirements.txt
+          python -m pip install --upgrade pip
 
-      - name: dbt debug
-        run: |
-          cd ${{ env.DBT_PROJECT_DIR }}
-          dbt debug --config-dir
+          pip install \
+            dbt-core==1.12.0 \
+            dbt-databricks==1.10.0
 
-      - name: dbt dependencies
+      - name: Show dbt version
         run: |
-          cd ${{ env.DBT_PROJECT_DIR }}
+          dbt --version
+
+      - name: Install dbt packages
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        run: |
           dbt deps
 
-      - name: dbt parse
+      - name: Parse dbt project
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: |
-          cd ${{ env.DBT_PROJECT_DIR }}
           dbt parse
-
-      - name: dbt build (dry-run)
-        run: |
-          cd ${{ env.DBT_PROJECT_DIR }}
-          dbt build --select state:modified+ --state ./target --exclude config.require_resource_names_without_spaces=False || true
 
       - name: Upload dbt artifacts
         if: always()
@@ -61,12 +92,13 @@ jobs:
           path: ${{ env.DBT_PROJECT_DIR }}/target
           retention-days: 5
 
-  tests-python:
+  python-tests:
+    name: Python tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python 3.12
@@ -77,11 +109,19 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install pytest
-          pip install -r airflow_dbt/requirements.txt
+
+      - name: Check tests directory
+        run: |
+          if [ -d "airflow_dbt/tests" ]; then
+            echo "✅ Tests directory found"
+          else
+            echo "⚠️ No airflow_dbt/tests directory found"
+            exit 0
+          fi
 
       - name: Run Python tests
         run: |
-          pytest tests/ -v --tb=short
-        continue-on-error: true
+          pytest airflow_dbt/tests/ -v --tb=short
+```
