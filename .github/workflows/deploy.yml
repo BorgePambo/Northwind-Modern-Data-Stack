@@ -1,0 +1,187 @@
+# .github/workflows/deploy.yml
+# Pipeline de Deploy para produção
+# Executa automaticamente após merge para main.
+# Também pode ser disparado manualmente via workflow_dispatch.
+#
+# Credenciais Databricks via GitHub Secrets:
+#   DATABRICKS_HOST           → URL do workspace Databricks
+#   DATABRICKS_TOKEN          → Personal Access Token (PAT) de deploy
+#   DATABRICKS_HTTP_PATH      → HTTP Path do SQL Warehouse de produção
+#   DATABRICKS_CATALOG        → Catalog Unity (dbt_northwind)
+#
+# Schemas de destino (configurados no dbt_project.yml):
+#   bronze  → seeds
+#   silver  → staging + intermediary + snapshots
+#   gold    → marts
+
+name: dbt Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'models/**'
+      - 'seeds/**'
+      - 'snapshots/**'
+      - 'macros/**'
+      - 'tests/**'
+      - 'dbt_project.yml'
+      - 'packages.yml'
+
+  # Permite disparo manual com opção de escolher o target e modelos
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'dbt target para deploy'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+      select:
+        description: 'Seletor de modelos dbt (ex: +fct_order_items)'
+        required: false
+        default: ''
+      full_refresh:
+        description: 'Executar com --full-refresh?'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  dbt-deploy:
+    name: dbt Deploy to Databricks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Setup Python
+      # -----------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # -----------------------------------------------------------------------
+      # 3. Instalar dbt-databricks
+      # -----------------------------------------------------------------------
+      - name: Install dbt-databricks
+        run: |
+          pip install --upgrade pip
+          pip install dbt-databricks==1.8.*
+
+      # -----------------------------------------------------------------------
+      # 4. Gerar profiles.yml de produção (sem commitar credenciais)
+      # -----------------------------------------------------------------------
+      - name: Generate profiles.yml for production
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << EOF
+          northwind_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: databricks
+                host: ${{ secrets.DATABRICKS_HOST }}
+                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
+                token: ${{ secrets.DATABRICKS_TOKEN }}
+                catalog: ${{ secrets.DATABRICKS_CATALOG }}
+                schema: bronze
+                threads: 8
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 5. dbt deps
+      # -----------------------------------------------------------------------
+      - name: dbt deps
+        run: dbt deps
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 6. dbt parse — validação antes do deploy
+      # -----------------------------------------------------------------------
+      - name: dbt parse
+        run: dbt parse
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 7. dbt seed — carrega/atualiza os seeds no schema bronze
+      # -----------------------------------------------------------------------
+      - name: dbt seed
+        run: dbt seed --target prod
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 8. dbt snapshot — executa snapshots SCD2 ANTES dos modelos
+      # O snapshot deve ser executado antes de dim_customers para
+      # garantir que o histórico é capturado.
+      # -----------------------------------------------------------------------
+      - name: dbt snapshot
+        run: dbt snapshot --target prod
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 9. dbt run — executa os modelos
+      # Se acionado manualmente com seletor específico, usa o seletor.
+      # -----------------------------------------------------------------------
+      - name: dbt run
+        run: |
+          SELECT="${{ github.event.inputs.select }}"
+          FULL_REFRESH="${{ github.event.inputs.full_refresh }}"
+
+          CMD="dbt run --target prod"
+
+          if [ -n "$SELECT" ]; then
+            CMD="$CMD --select $SELECT"
+          fi
+
+          if [ "$FULL_REFRESH" = "true" ]; then
+            CMD="$CMD --full-refresh"
+          fi
+
+          echo "Executing: $CMD"
+          eval $CMD
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 10. dbt test — executa todos os testes após o build
+      # -----------------------------------------------------------------------
+      - name: dbt test
+        run: dbt test --target prod
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # 11. Upload manifest de produção como artefato (para slim CI)
+      # -----------------------------------------------------------------------
+      - name: Upload production manifest
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: dbt-manifest-prod-${{ github.sha }}
+          path: target/manifest.json
+          retention-days: 30
+
+      # -----------------------------------------------------------------------
+      # 12. Notificação de falha (configure o webhook Slack se necessário)
+      # -----------------------------------------------------------------------
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Deploy failed for commit ${{ github.sha }}"
+          echo "Check the logs at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        # Para notificação Slack, descomente e configure SLACK_WEBHOOK_URL no Secrets:
+        # uses: 8398a7/action-slack@v3
+        # with:
+        #   status: ${{ job.status }}
+        #   webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}

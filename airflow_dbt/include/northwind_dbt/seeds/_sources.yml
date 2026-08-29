@@ -1,0 +1,138 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# Configuração dos seeds Northwind
+# Separador: ; (semicolon)
+# Os seeds são carregados no schema bronze do catalog dbt_northwind
+# ---------------------------------------------------------------------------
+
+seeds:
+
+  - name: categories
+    description: >
+      Categorias de produtos. Cada produto pertence a exatamente uma categoria.
+    config:
+      column_types:
+        CategoryID: int
+        CategoryName: varchar(50)
+        Description: varchar(500)
+
+  - name: customers
+    description: >
+      Clientes da empresa Northwind. Cada registro representa um cliente
+      identificado por um código alfanumérico de 5 caracteres (CustomerID).
+    config:
+      column_types:
+        CustomerID: varchar(10)
+        CompanyName: varchar(100)
+        ContactName: varchar(100)
+        ContactTitle: varchar(50)
+        Address: varchar(200)
+        City: varchar(50)
+        Region: varchar(50)
+        PostalCode: varchar(20)
+        Country: varchar(50)
+        Phone: varchar(30)
+
+  - name: employees
+    description: >
+      Funcionários da Northwind. Inclui dados pessoais, cargo, hierarquia
+      (ReportsTo) e salário. Utilizado no snapshot SCD2.
+    config:
+      column_types:
+        EmployeeID: int
+        LastName: varchar(50)
+        FirstName: varchar(50)
+        Title: varchar(100)
+        TitleOfCourtesy: varchar(10)
+        BirthDate: timestamp
+        HireDate: timestamp
+        Address: varchar(200)
+        City: varchar(50)
+        Region: varchar(50)
+        PostalCode: varchar(20)
+        Country: varchar(50)
+        HomePhone: varchar(30)
+        Extension: varchar(10)
+        Notes: varchar(2000)
+        ReportsTo: int
+        PhotoPath: varchar(500)
+        Salary: decimal(10,2)
+
+  - name: orderdetails
+    description: >
+      Itens de cada pedido (linhas de pedido). Chave composta: OrderID + ProductID.
+      Contém quantidade, preço unitário e desconto por item.
+    config:
+      column_types:
+        OrderID: int
+        ProductID: int
+        UnitPrice: decimal(10,2)
+        Quantity: int
+        Discount: decimal(5,4)
+
+  - name: orders
+    description: >
+      Cabeçalho dos pedidos da Northwind. Contém dados do cliente, funcionário,
+      datas, frete e endereço de entrega.
+    config:
+      column_types:
+        OrderID: int
+        CustomerID: varchar(10)
+        EmployeeID: int
+        OrderDate: timestamp
+        RequiredDate: timestamp
+        ShippedDate: timestamp
+        ShipVia: int
+        Freight: decimal(10,2)
+        ShipName: varchar(100)
+        ShipAddress: varchar(200)
+        ShipCity: varchar(50)
+        ShipRegion: varchar(50)
+        ShipPostalCode: varchar(20)
+        ShipCountry: varchar(50)
+
+  - name: products
+    description: >
+      Produtos comercializados pela Northwind. Cada produto está associado a
+      um fornecedor (SupplierID) e uma categoria (CategoryID).
+    config:
+      column_types:
+        ProductID: int
+        ProductName: varchar(100)
+        SupplierID: int
+        CategoryID: int
+        QuantityPerUnit: varchar(50)
+        UnitPrice: decimal(10,2)
+        UnitsInStock: int
+        UnitsOnOrder: int
+        ReorderLevel: int
+        Discontinued: int
+
+  - name: shippers
+    description: >
+      Transportadoras utilizadas para entrega dos pedidos.
+    config:
+      column_types:
+        ShipperID: int
+        CompanyName: varchar(100)
+        Phone: varchar(30)
+
+  - name: suppliers
+    description: >
+      Fornecedores dos produtos Northwind. Contém informações de contato
+      e localização.
+    config:
+      column_types:
+        SupplierID: int
+        CompanyName: varchar(100)
+        ContactName: varchar(100)
+        ContactTitle: varchar(50)
+        Address: varchar(200)
+        City: varchar(50)
+        Region: varchar(50)
+        PostalCode: varchar(20)
+        Country: varchar(50)
+        Phone: varchar(30)
+        Fax: varchar(30)
+        HomePage: varchar(500)

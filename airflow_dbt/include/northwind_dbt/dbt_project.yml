@@ -1,0 +1,68 @@
+name: 'northwind_dbt'
+version: '1.0.0'
+config-version: 2
+
+profile: 'northwind_dbt'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# ---------------------------------------------------------------------------
+# Seeds
+# Os seeds representam a camada de ingestão (Bronze).
+# São materializados no schema bronze do catalog dbt_northwind.
+# ---------------------------------------------------------------------------
+seeds:
+  northwind_dbt:
+    +schema: bronze
+    +quote_columns: false
+    +delimiter: ";"
+
+# ---------------------------------------------------------------------------
+# Modelos
+# Arquitetura Medallion:
+#   staging     → Silver  (limpeza, padronização, tipagem)
+#   intermediate → Silver (JOINs, enriquecimento, lógica de negócio)
+#   marts       → Gold   (modelagem dimensional: fatos e dimensões)
+# ---------------------------------------------------------------------------
+models:
+  northwind_dbt:
+
+    staging:
+      +materialized: view
+      +schema: silver
+      +tags: ["staging", "silver"]
+
+    intermediate:
+      +materialized: ephemeral
+      +tags: ["intermediate", "silver"]
+
+    marts:
+      +materialized: table
+      +schema: gold
+      +tags: ["marts", "gold"]
+
+# ---------------------------------------------------------------------------
+# Snapshots
+# SCD Type 2 para customers, gravado no schema silver
+# ---------------------------------------------------------------------------
+snapshots:
+  northwind_dbt:
+    +target_schema: silver
+    +tags: ["snapshot", "scd2"]
+
+# ---------------------------------------------------------------------------
+# Variáveis globais do projeto
+# ---------------------------------------------------------------------------
+vars:
+  northwind_dbt:
+    # Estratégia de snapshot para customers (sem timestamp disponível → check)
+    customer_snapshot_strategy: "check"

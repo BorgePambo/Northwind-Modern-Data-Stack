@@ -1,0 +1,298 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# Documentação e testes da camada Marts (Gold)
+# Modelos dimensionais materializados como Delta Tables no schema gold.
+# Inclui testes de unicidade, not_null e relacionamentos (FK → PK).
+# ---------------------------------------------------------------------------
+
+models:
+
+  # -------------------------------------------------------------------------
+  # dim_customers
+  # -------------------------------------------------------------------------
+  - name: dim_customers
+    description: >
+      Dimensão de clientes. Representa o estado atual dos clientes Northwind.
+      O histórico de mudanças é preservado no snapshot customers_snapshot (SCD Type 2).
+      Granularidade: um registro por customer_id.
+    columns:
+      - name: customer_key
+        description: "Surrogate key gerada via MD5 hash do customer_id."
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Código natural do cliente (5 chars alfanuméricos, ex ALFKI)."
+        tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: "Razão social do cliente."
+        tests:
+          - not_null
+      - name: country
+        description: "País do cliente. Útil para análises geográficas."
+        tests:
+          - not_null
+      - name: city
+        description: "Cidade do cliente."
+      - name: contact_title
+        description: "Cargo do contato principal."
+
+  # -------------------------------------------------------------------------
+  # dim_employees
+  # -------------------------------------------------------------------------
+  - name: dim_employees
+    description: >
+      Dimensão de funcionários. Inclui self-join para nome e cargo do gerente,
+      além de atributo derivado years_at_company.
+      Granularidade: um registro por employee_id.
+    columns:
+      - name: employee_key
+        description: "Surrogate key gerada via MD5 hash do employee_id."
+        tests:
+          - unique
+          - not_null
+      - name: employee_id
+        description: "Identificador natural do funcionário."
+        tests:
+          - unique
+          - not_null
+      - name: full_name
+        description: "Nome completo do funcionário."
+        tests:
+          - not_null
+      - name: title
+        description: "Cargo/título do funcionário."
+        tests:
+          - not_null
+      - name: country
+        description: "País do funcionário."
+      - name: hire_date
+        description: "Data de contratação."
+      - name: years_at_company
+        description: "Tempo de empresa em anos inteiros (calculado dinamicamente)."
+      - name: manager_full_name
+        description: "Nome completo do gerente direto. NULL para o CEO/VP."
+      - name: reports_to_employee_id
+        description: "ID do gerente direto na hierarquia de funcionários."
+
+  # -------------------------------------------------------------------------
+  # dim_products
+  # -------------------------------------------------------------------------
+  - name: dim_products
+    description: >
+      Dimensão conformada de produtos. Desnormaliza produto, categoria e fornecedor.
+      Granularidade: um registro por product_id.
+      Decisão arquitetural: dimensão outrigger — evita múltiplos JOINs na fato.
+    columns:
+      - name: product_key
+        description: "Surrogate key gerada via MD5 hash do product_id."
+        tests:
+          - unique
+          - not_null
+      - name: product_id
+        description: "Identificador natural do produto."
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        description: "Nome comercial do produto."
+        tests:
+          - not_null
+      - name: category_id
+        description: "FK para a categoria do produto."
+        tests:
+          - not_null
+      - name: category_name
+        description: "Nome da categoria do produto."
+        tests:
+          - not_null
+      - name: supplier_id
+        description: "FK para o fornecedor do produto."
+        tests:
+          - not_null
+      - name: supplier_name
+        description: "Razão social do fornecedor."
+        tests:
+          - not_null
+      - name: unit_price
+        description: "Preço unitário atual do produto no catálogo."
+      - name: is_discontinued
+        description: "Indica se o produto está descontinuado."
+      - name: supplier_country
+        description: "País do fornecedor. Útil para análises de sourcing."
+
+  # -------------------------------------------------------------------------
+  # dim_shippers
+  # -------------------------------------------------------------------------
+  - name: dim_shippers
+    description: >
+      Dimensão de transportadoras. Northwind usa 3 carriers padrão.
+      Granularidade: um registro por shipper_id.
+    columns:
+      - name: shipper_key
+        description: "Surrogate key gerada via MD5 hash do shipper_id."
+        tests:
+          - unique
+          - not_null
+      - name: shipper_id
+        description: "Identificador natural da transportadora."
+        tests:
+          - unique
+          - not_null
+      - name: shipper_name
+        description: "Nome comercial da transportadora."
+        tests:
+          - not_null
+      - name: shipper_phone
+        description: "Telefone da transportadora."
+
+  # -------------------------------------------------------------------------
+  # dim_date
+  # -------------------------------------------------------------------------
+  - name: dim_date
+    description: >
+      Dimensão de data gerada a partir do range de datas dos pedidos.
+      Inclui atributos de calendário para facilitar análises temporais no Power BI.
+      Granularidade: um registro por dia de calendário.
+    columns:
+      - name: date_key
+        description: "Surrogate key no formato YYYYMMDD (int). Ex: 20200704."
+        tests:
+          - unique
+          - not_null
+      - name: calendar_date
+        description: "Data no formato date."
+        tests:
+          - unique
+          - not_null
+      - name: year
+        description: "Ano (ex: 2020)."
+      - name: quarter
+        description: "Trimestre (1-4)."
+      - name: month
+        description: "Mês numérico (1-12)."
+      - name: month_name
+        description: "Nome do mês por extenso (ex: January)."
+      - name: day_of_week
+        description: "Dia da semana (1=Sunday no Spark SQL)."
+      - name: is_weekend
+        description: "Indica se o dia é fim de semana."
+      - name: year_quarter
+        description: "Representação textual do trimestre (ex: 2020-Q3)."
+      - name: year_month
+        description: "Representação textual do mês (ex: 2020-07)."
+
+  # -------------------------------------------------------------------------
+  # fct_order_items
+  # -------------------------------------------------------------------------
+  - name: fct_order_items
+    description: >
+      Tabela fato de itens de pedido. Grão: um registro por linha de pedido
+      (order_id + product_id). Contém todas as métricas de vendas e referências
+      às dimensões exclusivamente via surrogate keys.
+
+      Modelagem dimensional:
+        - Surrogate keys para todas as dimensões (*_key)
+        - order_id mantido como dimensão degenerada (não existe dim_orders)
+        - product_id removido — obtível via dim_products.product_id
+        - customer_id / employee_id / shipper_id removidos — obtíveis via dimensões
+        - Datas degeneradas mantidas para conveniência de filtros no BI
+
+      Métricas disponíveis:
+        - unit_price: preço unitário cobrado
+        - quantity: quantidade vendida
+        - discount_rate: taxa de desconto (0.0 - 1.0)
+        - gross_amount: receita bruta do item
+        - net_amount: receita líquida após desconto
+        - discount_amount: valor monetário do desconto
+        - freight_amount_allocated: frete rateado proporcionalmente por item
+
+      Dimensões referenciadas: dim_customers, dim_employees, dim_products,
+      dim_shippers, dim_date (via order_date_key e shipped_date_key).
+
+      SCD Type 2: customer_key aponta para o estado atual do cliente.
+      O histórico está em silver.customers_snapshot.
+    columns:
+      - name: order_item_key
+        description: "Surrogate key da fato (hash de order_id + product_id)."
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: >
+          Número do pedido (dimensão degenerada). Não existe dim_orders —
+          o order_id é o identificador natural do pedido mantido na fato.
+        tests:
+          - not_null
+      - name: customer_key
+        description: "FK → dim_customers.customer_key. Aponta para o estado atual do cliente."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: employee_key
+        description: "FK → dim_employees.employee_key."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_employees')
+              field: employee_key
+      - name: product_key
+        description: "FK → dim_products.product_key."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
+      - name: shipper_key
+        description: "FK → dim_shippers.shipper_key."
+        tests:
+          - relationships:
+              to: ref('dim_shippers')
+              field: shipper_key
+      - name: order_date_key
+        description: "FK → dim_date.date_key. Formato YYYYMMDD."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: shipped_date_key
+        description: "FK → dim_date.date_key para a data de envio. NULL se ainda não enviado."
+      - name: order_date
+        description: "Data do pedido (dimensão degenerada para conveniência de filtros)."
+      - name: required_date
+        description: "Data de entrega esperada pelo cliente."
+      - name: shipped_date
+        description: "Data de envio efetivo. NULL se ainda não enviado."
+      - name: shipping_status
+        description: "Status de envio (Pendente, Atrasado, No prazo)."
+        tests:
+          - accepted_values:
+              values: ['Pendente', 'Atrasado', 'No prazo']
+      - name: ship_city
+        description: "Cidade de destino do pedido (atributo degenerado)."
+      - name: ship_country
+        description: "País de destino do pedido (atributo degenerado)."
+      - name: unit_price
+        description: "Preço unitário no momento da venda."
+        tests:
+          - not_null
+      - name: quantity
+        description: "Quantidade vendida do produto no item."
+        tests:
+          - not_null
+      - name: discount_rate
+        description: "Taxa de desconto aplicada (0.0 a 1.0)."
+      - name: gross_amount
+        description: "Receita bruta do item (unit_price × quantity)."
+      - name: net_amount
+        description: "Receita líquida do item após desconto."
+      - name: discount_amount
+        description: "Valor monetário do desconto concedido."
+      - name: freight_amount_allocated
+        description: "Frete rateado proporcionalmente ao valor líquido do item no pedido."

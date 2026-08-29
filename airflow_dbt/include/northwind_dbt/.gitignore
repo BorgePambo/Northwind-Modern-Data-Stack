@@ -1,0 +1,85 @@
+# ============================================================
+# dbt
+# ============================================================
+target/
+dbt_packages/
+logs/
+*.log
+
+# dbt artefatos compilados
+/target/
+
+# ============================================================
+# Credenciais e segredos — NUNCA versionar
+# ============================================================
+.env
+.env.*
+!.env.example
+*.env
+
+# Databricks e dbt profiles locais
+profiles.yml
+~/.dbt/
+
+# Tokens e chaves
+*.token
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.yml
+credentials.json
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.cache
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+.python-version
+
+# ============================================================
+# IDEs e Editores
+# ============================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Jupyter Notebooks
+# ============================================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ============================================================
+# Sistema Operacional
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# ============================================================
+# GitHub Actions (artefatos locais)
+# ============================================================
+.github/actions/*/node_modules/

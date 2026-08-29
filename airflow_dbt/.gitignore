@@ -1,0 +1,188 @@
+# ==============================================================================
+# .gitignore — Projeto Airflow + dbt + Databricks (Astronomer Cosmos)
+# Cobre: dbt, Airflow, Python, Docker, GitHub Actions, Databricks
+# ==============================================================================
+
+
+# ==============================================================================
+# CREDENCIAIS E SECRETS — nunca versionar
+# ==============================================================================
+
+# Arquivos de variáveis de ambiente (podem conter tokens, senhas, URLs privadas)
+.env
+.env.*
+!.env.example
+
+# dbt profiles — contém token do Databricks em texto plano
+include/.dbt/profiles.yml
+include/.dbt/.user.yml
+
+# Tokens, chaves e certificados genéricos
+*.token
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+secrets.yml
+credentials.json
+service_account.json
+
+# Databricks CLI
+.databrickscfg
+databricks.cfg
+.databricks/
+
+
+# ==============================================================================
+# dbt — artefatos gerados (não são código-fonte)
+# ==============================================================================
+
+# Artefatos compilados: manifest.json, partial_parse.msgpack, SQLs compilados,
+# run_results.json, graph.gpickle (~3 MB combinados — gerados por dbt compile/run)
+include/northwind_dbt/target/
+
+# Pacotes dbt instalados via `dbt deps` (equivalente a node_modules)
+# Reinstalar com: dbt deps --project-dir include/northwind_dbt
+include/northwind_dbt/dbt_packages/
+
+# Logs de execução do dbt
+include/northwind_dbt/logs/
+*.log
+
+
+# ==============================================================================
+# AIRFLOW — estado e configuração de runtime local
+# ==============================================================================
+
+# Banco SQLite do Airflow (ambiente local de desenvolvimento)
+airflow.db
+
+# Configuração local gerada automaticamente pelo Airflow
+airflow.cfg
+webserver_config.py
+
+# PIDs de processo
+airflow-webserver.pid
+*.pid
+
+# Logs do Airflow (scheduler, triggerer, tasks, webserver)
+logs/
+
+
+# ==============================================================================
+# COSMOS (Astronomer) — cache de DAG parsing gerado em /tmp
+# ==============================================================================
+/tmp/cosmos/
+
+
+# ==============================================================================
+# PYTHON
+# ==============================================================================
+
+# Bytecode compilado
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Build e distribuição
+*.egg-info/
+*.egg
+dist/
+build/
+wheels/
+pip-log.txt
+
+# Caches de ferramentas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.tox/
+.nox/
+
+# Cobertura de testes
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+
+# ==============================================================================
+# DOCKER / DOCKER COMPOSE
+# ==============================================================================
+
+# Overrides locais que podem conter paths ou portas específicas da máquina
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Volumes Docker mapeados localmente
+.docker/
+
+
+# ==============================================================================
+# GITHUB ACTIONS — artefatos locais
+# ==============================================================================
+
+# node_modules de actions JavaScript customizadas (se houver)
+.github/actions/*/node_modules/
+
+# Artefatos de execução local via `act`
+.act/
+
+
+# ==============================================================================
+# IDEs E EDITORES
+# ==============================================================================
+
+# JetBrains (PyCharm, DataGrip, etc.)
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+
+# ==============================================================================
+# JUPYTER
+# ==============================================================================
+.ipynb_checkpoints/
+*.ipynb
+
+
+# ==============================================================================
+# MISC
+# ==============================================================================
+*.tmp
+*.bak
+*.orig
+*.rej
+.scannerwork/

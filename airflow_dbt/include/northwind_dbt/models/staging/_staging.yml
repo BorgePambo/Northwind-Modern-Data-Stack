@@ -1,0 +1,260 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# Documentação e testes da camada Staging (Silver)
+# Os modelos staging limpam, renomeiam e tipam os dados da camada Bronze.
+# Referências de FK não são testadas com relationships aqui pois os seeds
+# são a origem — os testes de relacionamento ficam na camada marts.
+# ---------------------------------------------------------------------------
+
+models:
+
+  # -------------------------------------------------------------------------
+  # stg_categories
+  # -------------------------------------------------------------------------
+  - name: stg_categories
+    description: >
+      Categorias de produtos. Cada produto pertence a exatamente uma categoria.
+      Materializado como view no schema silver.
+    columns:
+      - name: category_id
+        description: Identificador único da categoria (PK).
+        tests:
+          - unique
+          - not_null
+      - name: category_name
+        description: Nome da categoria de produto.
+        tests:
+          - not_null
+      - name: category_description
+        description: Descrição textual da categoria.
+
+  # -------------------------------------------------------------------------
+  # stg_customers
+  # -------------------------------------------------------------------------
+  - name: stg_customers
+    description: >
+      Clientes da empresa Northwind. CustomerID é um código alfanumérico de
+      5 caracteres (ex: ALFKI). Tabela alvo do snapshot SCD Type 2.
+    columns:
+      - name: customer_id
+        description: Identificador único do cliente (PK). Código de 5 chars.
+        tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: Razão social do cliente.
+        tests:
+          - not_null
+      - name: contact_name
+        description: Nome do contato principal na empresa cliente.
+      - name: contact_title
+        description: "Cargo do contato (ex: Sales Representative, Owner)."
+      - name: address
+        description: Endereço do cliente.
+      - name: city
+        description: Cidade do cliente.
+      - name: region
+        description: Região/Estado do cliente. Nulo quando não aplicável.
+      - name: postal_code
+        description: CEP/Código postal do cliente.
+      - name: country
+        description: País do cliente.
+        tests:
+          - not_null
+      - name: phone
+        description: Telefone de contato do cliente.
+
+  # -------------------------------------------------------------------------
+  # stg_employees
+  # -------------------------------------------------------------------------
+  - name: stg_employees
+    description: >
+      Funcionários da Northwind. Inclui hierarquia via reports_to_employee_id.
+      O VP de Vendas (Andrew Fuller, ID=2) não reporta a ninguém (NULL).
+    columns:
+      - name: employee_id
+        description: Identificador único do funcionário (PK).
+        tests:
+          - unique
+          - not_null
+      - name: first_name
+        description: Primeiro nome do funcionário.
+        tests:
+          - not_null
+      - name: last_name
+        description: Sobrenome do funcionário.
+        tests:
+          - not_null
+      - name: full_name
+        description: Nome completo (first_name + last_name).
+      - name: title
+        description: "Cargo do funcionário (ex: Sales Representative, Sales Manager)."
+      - name: title_of_courtesy
+        description: Pronome de tratamento (Mr., Ms., Dr., Mrs.).
+      - name: birth_date
+        description: Data de nascimento.
+      - name: hire_date
+        description: Data de contratação.
+      - name: reports_to_employee_id
+        description: ID do gerente direto. NULL para o topo da hierarquia.
+      - name: city
+        description: Cidade de residência do funcionário.
+      - name: country
+        description: País do funcionário.
+      - name: salary
+        description: Salário do funcionário.
+
+  # -------------------------------------------------------------------------
+  # stg_orders
+  # -------------------------------------------------------------------------
+  - name: stg_orders
+    description: >
+      Cabeçalho dos pedidos. Um pedido pode ter múltiplos itens (stg_order_details).
+      Inclui campo derivado shipping_status calculado a partir das datas.
+    columns:
+      - name: order_id
+        description: Identificador único do pedido (PK).
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: FK para stg_customers.customer_id.
+        tests:
+          - not_null
+      - name: employee_id
+        description: FK para stg_employees.employee_id.
+        tests:
+          - not_null
+      - name: shipper_id
+        description: FK para stg_shippers.shipper_id.
+      - name: order_date
+        description: Data em que o pedido foi realizado.
+        tests:
+          - not_null
+      - name: required_date
+        description: Data em que o cliente precisa do pedido.
+      - name: shipped_date
+        description: Data de envio efetivo. Nulo se ainda não enviado.
+      - name: shipping_status
+        description: Status derivado de envio (Pendente, Atrasado, No prazo).
+        tests:
+          - accepted_values:
+              values: ['Pendente', 'Atrasado', 'No prazo']
+      - name: freight_amount
+        description: Valor do frete em dólares.
+      - name: ship_country
+        description: País de destino do pedido.
+
+  # -------------------------------------------------------------------------
+  # stg_order_details
+  # -------------------------------------------------------------------------
+  - name: stg_order_details
+    description: >
+      Itens de pedido. Chave composta (order_id, product_id).
+      Inclui cálculos de valor bruto, líquido e desconto por item.
+    columns:
+      - name: order_id
+        description: FK para stg_orders.order_id. Parte da chave composta.
+        tests:
+          - not_null
+      - name: product_id
+        description: FK para stg_products.product_id. Parte da chave composta.
+        tests:
+          - not_null
+      - name: unit_price
+        description: Preço unitário do produto no momento do pedido.
+        tests:
+          - not_null
+      - name: quantity
+        description: Quantidade do produto no item de pedido.
+        tests:
+          - not_null
+      - name: discount_rate
+        description: Percentual de desconto aplicado (0.0 a 1.0).
+      - name: gross_amount
+        description: Valor bruto do item (unit_price * quantity).
+      - name: net_amount
+        description: Valor líquido do item após desconto.
+      - name: discount_amount
+        description: Valor monetário do desconto aplicado ao item.
+
+  # -------------------------------------------------------------------------
+  # stg_products
+  # -------------------------------------------------------------------------
+  - name: stg_products
+    description: >
+      Produtos comercializados. Campo is_discontinued indica se o produto
+      foi retirado de linha (boolean).
+    columns:
+      - name: product_id
+        description: Identificador único do produto (PK).
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        description: Nome do produto.
+        tests:
+          - not_null
+      - name: supplier_id
+        description: FK para stg_suppliers.supplier_id.
+        tests:
+          - not_null
+      - name: category_id
+        description: FK para stg_categories.category_id.
+        tests:
+          - not_null
+      - name: unit_price
+        description: Preço de venda do produto.
+      - name: units_in_stock
+        description: Quantidade em estoque.
+      - name: units_on_order
+        description: Quantidade em pedido para reposição.
+      - name: reorder_level
+        description: Nível mínimo de estoque para gerar novo pedido.
+      - name: is_discontinued
+        description: Indica se o produto está descontinuado (true/false).
+
+  # -------------------------------------------------------------------------
+  # stg_shippers
+  # -------------------------------------------------------------------------
+  - name: stg_shippers
+    description: >
+      Transportadoras que realizam as entregas dos pedidos Northwind.
+    columns:
+      - name: shipper_id
+        description: Identificador único da transportadora (PK).
+        tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: Razão social da transportadora.
+        tests:
+          - not_null
+      - name: phone
+        description: Telefone da transportadora.
+
+  # -------------------------------------------------------------------------
+  # stg_suppliers
+  # -------------------------------------------------------------------------
+  - name: stg_suppliers
+    description: >
+      Fornecedores dos produtos Northwind. Dados de contato e localização.
+    columns:
+      - name: supplier_id
+        description: Identificador único do fornecedor (PK).
+        tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: Razão social do fornecedor.
+        tests:
+          - not_null
+      - name: contact_name
+        description: Nome do contato no fornecedor.
+      - name: country
+        description: País do fornecedor.
+        tests:
+          - not_null
+      - name: city
+        description: Cidade do fornecedor.

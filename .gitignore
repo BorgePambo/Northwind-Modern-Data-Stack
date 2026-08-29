@@ -1,0 +1,11 @@
+
+
+.env
+.env.*
+!.env.example
+
+.dbt-env/
+
+dbt_packages/
+
+dbt_env
