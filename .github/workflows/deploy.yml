@@ -1,4 +1,3 @@
-```yaml
 # .github/workflows/deploy.yml
 # Pipeline de Deploy para DEV/PROD
 # Executa automaticamente após push para develop ou main.
