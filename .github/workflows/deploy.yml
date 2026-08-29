@@ -1,17 +1,20 @@
 # .github/workflows/deploy.yml
-# Pipeline de Deploy para produção
-# Executa automaticamente após merge para main.
+# Pipeline de Deploy para DEV/PROD
+# Executa automaticamente após push para develop ou main.
 # Também pode ser disparado manualmente via workflow_dispatch.
 #
 # Credenciais Databricks via GitHub Secrets:
 #   DATABRICKS_HOST           → URL do workspace Databricks
-#   DATABRICKS_TOKEN          → Personal Access Token (PAT) de deploy
-#   DATABRICKS_HTTP_PATH      → HTTP Path do SQL Warehouse de produção
+#   DATABRICKS_TOKEN          → Personal Access Token (PAT)
+#   DATABRICKS_HTTP_PATH      → HTTP Path do SQL Warehouse
 #   DATABRICKS_CATALOG        → Catalog Unity (dbt_northwind)
 #
-# Schemas de destino (configurados no dbt_project.yml):
+# Estrutura dbt:
+#   airflow_dbt/include/northwind_dbt/
+#
+# Schemas:
 #   bronze  → seeds
-#   silver  → staging + intermediary + snapshots
+#   silver  → staging + intermediate + snapshots
 #   gold    → marts
 
 name: dbt Deploy
@@ -20,30 +23,32 @@ on:
   push:
     branches:
       - main
+      - develop
     paths:
-      - 'models/**'
-      - 'seeds/**'
-      - 'snapshots/**'
-      - 'macros/**'
-      - 'tests/**'
-      - 'dbt_project.yml'
-      - 'packages.yml'
+      - 'airflow_dbt/include/northwind_dbt/models/**'
+      - 'airflow_dbt/include/northwind_dbt/seeds/**'
+      - 'airflow_dbt/include/northwind_dbt/snapshots/**'
+      - 'airflow_dbt/include/northwind_dbt/macros/**'
+      - 'airflow_dbt/include/northwind_dbt/tests/**'
+      - 'airflow_dbt/include/northwind_dbt/dbt_project.yml'
+      - 'airflow_dbt/include/northwind_dbt/packages.yml'
 
-  # Permite disparo manual com opção de escolher o target e modelos
   workflow_dispatch:
     inputs:
       target:
-        description: 'dbt target para deploy'
+        description: 'Ambiente do deploy'
         required: true
         default: 'prod'
         type: choice
         options:
           - prod
           - dev
+
       select:
         description: 'Seletor de modelos dbt (ex: +fct_order_items)'
         required: false
         default: ''
+
       full_refresh:
         description: 'Executar com --full-refresh?'
         required: false
@@ -55,9 +60,9 @@ jobs:
     name: dbt Deploy to Databricks
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: production
 
     steps:
+
       # -----------------------------------------------------------------------
       # 1. Checkout
       # -----------------------------------------------------------------------
@@ -82,15 +87,44 @@ jobs:
           pip install dbt-databricks==1.8.*
 
       # -----------------------------------------------------------------------
-      # 4. Gerar profiles.yml de produção (sem commitar credenciais)
+      # 4. Definir ambiente
       # -----------------------------------------------------------------------
-      - name: Generate profiles.yml for production
+      - name: Set deployment target
+        id: target
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ github.event.inputs.target }}"
+          elif [ "${{ github.ref_name }}" = "develop" ]; then
+            TARGET="dev"
+          else
+            TARGET="prod"
+          fi
+
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Deploy target: $TARGET"
+
+      # -----------------------------------------------------------------------
+      # 5. Gerar profiles.yml dinamicamente
+      # -----------------------------------------------------------------------
+      - name: Generate profiles.yml
+        shell: bash
         run: |
           mkdir -p ~/.dbt
+
           cat > ~/.dbt/profiles.yml << EOF
           northwind_dbt:
-            target: prod
+            target: ${{ steps.target.outputs.target }}
             outputs:
+              dev:
+                type: databricks
+                host: ${{ secrets.DATABRICKS_HOST }}
+                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
+                token: ${{ secrets.DATABRICKS_TOKEN }}
+                catalog: ${{ secrets.DATABRICKS_CATALOG }}
+                schema: bronze
+                threads: 8
+
               prod:
                 type: databricks
                 host: ${{ secrets.DATABRICKS_HOST }}
@@ -102,45 +136,44 @@ jobs:
           EOF
 
       # -----------------------------------------------------------------------
-      # 5. dbt deps
+      # 6. dbt deps
       # -----------------------------------------------------------------------
       - name: dbt deps
         run: dbt deps
-        working-directory: ${{ github.workspace }}
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 6. dbt parse — validação antes do deploy
+      # 7. dbt parse
       # -----------------------------------------------------------------------
       - name: dbt parse
-        run: dbt parse
-        working-directory: ${{ github.workspace }}
+        run: dbt parse --target ${{ steps.target.outputs.target }}
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 7. dbt seed — carrega/atualiza os seeds no schema bronze
+      # 8. dbt seed
       # -----------------------------------------------------------------------
       - name: dbt seed
-        run: dbt seed --target prod
-        working-directory: ${{ github.workspace }}
+        run: dbt seed --target ${{ steps.target.outputs.target }}
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 8. dbt snapshot — executa snapshots SCD2 ANTES dos modelos
-      # O snapshot deve ser executado antes de dim_customers para
-      # garantir que o histórico é capturado.
+      # 9. dbt snapshot
       # -----------------------------------------------------------------------
       - name: dbt snapshot
-        run: dbt snapshot --target prod
-        working-directory: ${{ github.workspace }}
+        run: dbt snapshot --target ${{ steps.target.outputs.target }}
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 9. dbt run — executa os modelos
-      # Se acionado manualmente com seletor específico, usa o seletor.
+      # 10. dbt run
       # -----------------------------------------------------------------------
       - name: dbt run
+        shell: bash
         run: |
           SELECT="${{ github.event.inputs.select }}"
           FULL_REFRESH="${{ github.event.inputs.full_refresh }}"
+          TARGET="${{ steps.target.outputs.target }}"
 
-          CMD="dbt run --target prod"
+          CMD="dbt run --target $TARGET"
 
           if [ -n "$SELECT" ]; then
             CMD="$CMD --select $SELECT"
@@ -151,37 +184,34 @@ jobs:
           fi
 
           echo "Executing: $CMD"
-          eval $CMD
-        working-directory: ${{ github.workspace }}
+          eval "$CMD"
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 10. dbt test — executa todos os testes após o build
+      # 11. dbt test
       # -----------------------------------------------------------------------
       - name: dbt test
-        run: dbt test --target prod
-        working-directory: ${{ github.workspace }}
+        run: dbt test --target ${{ steps.target.outputs.target }}
+        working-directory: airflow_dbt/include/northwind_dbt
 
       # -----------------------------------------------------------------------
-      # 11. Upload manifest de produção como artefato (para slim CI)
+      # 12. Upload manifest
       # -----------------------------------------------------------------------
-      - name: Upload production manifest
+      - name: Upload dbt manifest
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: dbt-manifest-prod-${{ github.sha }}
-          path: target/manifest.json
+          name: dbt-manifest-${{ steps.target.outputs.target }}-${{ github.sha }}
+          path: airflow_dbt/include/northwind_dbt/target/manifest.json
           retention-days: 30
 
       # -----------------------------------------------------------------------
-      # 12. Notificação de falha (configure o webhook Slack se necessário)
+      # 13. Notificação de falha
       # -----------------------------------------------------------------------
       - name: Notify on failure
         if: failure()
         run: |
-          echo "Deploy failed for commit ${{ github.sha }}"
-          echo "Check the logs at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        # Para notificação Slack, descomente e configure SLACK_WEBHOOK_URL no Secrets:
-        # uses: 8398a7/action-slack@v3
-        # with:
-        #   status: ${{ job.status }}
-        #   webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          echo "Deploy failed."
+          echo "Environment: ${{ steps.target.outputs.target }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
