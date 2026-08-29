@@ -215,4 +215,3 @@ jobs:
           echo "Environment: ${{ steps.target.outputs.target }}"
           echo "Commit: ${{ github.sha }}"
           echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-```
