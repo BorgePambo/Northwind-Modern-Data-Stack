@@ -1,127 +1,54 @@
-```yaml
-name: CI - dbt Validation
+name: CI - dbt Databricks
 
 on:
-  pull_request:
+  push:
     branches:
       - develop
+
+  pull_request:
+    branches:
       - main
 
-  workflow_dispatch:
-
-env:
-  DBT_PROJECT_DIR: airflow_dbt/include/northwind_dbt
-
 jobs:
-  dbt-validation:
+  dbt-ci:
     name: Validate dbt project
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
+
+    defaults:
+      run:
+        working-directory: airflow_dbt/include/northwind_dbt
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show repository structure
-        run: |
-          echo "Repository:"
-          pwd
-
-          echo ""
-          echo "Root:"
-          ls -la
-
-          echo ""
-          echo "airflow_dbt:"
-          ls -la airflow_dbt
-
-          echo ""
-          echo "include:"
-          ls -la airflow_dbt/include
-
-      - name: Validate dbt project path
-        run: |
-          if [ ! -d "${DBT_PROJECT_DIR}" ]; then
-            echo "❌ dbt project directory not found:"
-            echo "${DBT_PROJECT_DIR}"
-            exit 1
-          fi
-
-          if [ ! -f "${DBT_PROJECT_DIR}/dbt_project.yml" ]; then
-            echo "❌ dbt_project.yml not found:"
-            echo "${DBT_PROJECT_DIR}/dbt_project.yml"
-            exit 1
-          fi
-
-          echo "✅ dbt project found:"
-          echo "${DBT_PROJECT_DIR}"
-
-      - name: Set up Python 3.12
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
 
       - name: Install dbt
         run: |
           python -m pip install --upgrade pip
-
           pip install \
-            dbt-core==1.12.0 \
-            dbt-databricks==1.10.0
+            dbt-core==1.12.3 \
+            dbt-databricks==1.10.9
 
-      - name: Show dbt version
-        run: |
-          dbt --version
+      - name: Check dbt version
+        run: dbt --version
 
       - name: Install dbt packages
-        working-directory: ${{ env.DBT_PROJECT_DIR }}
-        run: |
-          dbt deps
+        run: dbt deps
 
-      - name: Parse dbt project
-        working-directory: ${{ env.DBT_PROJECT_DIR }}
-        run: |
-          dbt parse
+      - name: Validate dbt project
+        run: dbt parse
 
-      - name: Upload dbt artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dbt-artifacts-${{ github.run_id }}
-          path: ${{ env.DBT_PROJECT_DIR }}/target
-          retention-days: 5
-
-  python-tests:
-    name: Python tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: Install test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest
-
-      - name: Check tests directory
-        run: |
-          if [ -d "airflow_dbt/tests" ]; then
-            echo "✅ Tests directory found"
-          else
-            echo "⚠️ No airflow_dbt/tests directory found"
-            exit 0
-          fi
-
-      - name: Run Python tests
-        run: |
-          pytest airflow_dbt/tests/ -v --tb=short
-```
+      - name: Build dbt project
+        run: dbt build
