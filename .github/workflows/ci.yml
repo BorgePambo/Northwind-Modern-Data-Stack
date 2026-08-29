@@ -30,6 +30,8 @@ on:
       - 'dbt_project.yml'
       - 'packages.yml'
 
+    workflow_dispatch:
+
 jobs:
   dbt-ci:
     name: dbt Build & Test
