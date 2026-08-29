@@ -1,18 +1,16 @@
 ```yaml
-name: CI - dbt Databricks
+name: CD - Deploy dbt Databricks
 
 on:
   push:
     branches:
-      - develop
-
-  pull_request:
-    branches:
       - main
 
+  workflow_dispatch:
+
 jobs:
-  dbt-ci:
-    name: Validate dbt project
+  deploy:
+    name: Deploy dbt to Databricks
     runs-on: ubuntu-latest
 
     env:
@@ -20,7 +18,6 @@ jobs:
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
       DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
-      DBT_PROFILES_DIR: ${{ github.workspace }}/airflow_dbt/include/.dbt
 
     defaults:
       run:
@@ -52,6 +49,6 @@ jobs:
       - name: Validate dbt project
         run: dbt parse
 
-      - name: Build dbt project
+      - name: Run dbt build
         run: dbt build
 ```
