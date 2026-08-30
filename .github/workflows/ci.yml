@@ -92,8 +92,15 @@ jobs:
       - name: Validate dbt project
         run: dbt parse
 
+      # Compile dbt project
+      # ------------------------
+      - name: Compile dbt project
+        run: dbt compile
+
       # ------------------------
       # Build dbt project
       # ------------------------
-      - name: Build dbt project
-        run: dbt build
+      - name: test dbt project
+        run: dbt test
+
+
