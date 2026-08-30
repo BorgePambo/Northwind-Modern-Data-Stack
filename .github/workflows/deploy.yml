@@ -1,4 +1,6 @@
-```yaml
+
+# .github/workflows/deploy.yml
+
 name: CD - Deploy dbt Databricks
 
 on:
@@ -24,15 +26,25 @@ jobs:
         working-directory: airflow_dbt/include/northwind_dbt
 
     steps:
+
+      # ------------------------
+      # Checkout
+      # ------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ------------------------
+      # Setup Python
+      # ------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
+      # ------------------------
+      # Install dbt
+      # ------------------------
       - name: Install dbt
         run: |
           python -m pip install --upgrade pip
@@ -40,15 +52,47 @@ jobs:
             dbt-core==1.12.3 \
             dbt-databricks==1.10.9
 
+      # ------------------------
+      # Check dbt version
+      # ------------------------
       - name: Check dbt version
         run: dbt --version
 
+      # ------------------------
+      # Setup dbt profile
+      # ------------------------
+      - name: Configure dbt profile
+        run: |
+          mkdir -p ~/.dbt
+
+          cat > ~/.dbt/profiles.yml <<EOF
+          northwind_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: databricks
+                host: ${{ secrets.DATABRICKS_HOST }}
+                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
+                token: ${{ secrets.DATABRICKS_TOKEN }}
+                catalog: ${{ secrets.DATABRICKS_CATALOG }}
+                schema: bronze
+                threads: 4
+          EOF
+
+      # ------------------------
+      # Install dbt packages
+      # ------------------------
       - name: Install dbt packages
         run: dbt deps
 
+      # ------------------------
+      # Validate dbt project
+      # ------------------------
       - name: Validate dbt project
         run: dbt parse
 
+      # ------------------------
+      # Run dbt build
+      # ------------------------
       - name: Run dbt build
         run: dbt build
-```
