@@ -1,130 +1,73 @@
-# .github/workflows/deploy.yml
-# Pipeline de Deploy para DEV/PROD
-# Executa automaticamente após push para develop ou main.
-# Também pode ser disparado manualmente via workflow_dispatch.
-#
-# Credenciais Databricks via GitHub Secrets:
-#   DATABRICKS_HOST           → URL do workspace Databricks
-#   DATABRICKS_TOKEN          → Personal Access Token (PAT)
-#   DATABRICKS_HTTP_PATH      → HTTP Path do SQL Warehouse
-#   DATABRICKS_CATALOG        → Catalog Unity (dbt_northwind)
-#
-# Estrutura dbt:
-#   airflow_dbt/include/northwind_dbt/
-#
-# Schemas:
-#   bronze  → seeds
-#   silver  → staging + intermediate + snapshots
-#   gold    → marts
 
-name: dbt Deploy
+
+name: CD - Deploy dbt Databricks
 
 on:
   push:
     branches:
       - main
-      - develop
-    paths:
-      - 'airflow_dbt/include/northwind_dbt/models/**'
-      - 'airflow_dbt/include/northwind_dbt/seeds/**'
-      - 'airflow_dbt/include/northwind_dbt/snapshots/**'
-      - 'airflow_dbt/include/northwind_dbt/macros/**'
-      - 'airflow_dbt/include/northwind_dbt/tests/**'
-      - 'airflow_dbt/include/northwind_dbt/dbt_project.yml'
-      - 'airflow_dbt/include/northwind_dbt/packages.yml'
 
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Ambiente do deploy'
-        required: true
-        default: 'prod'
-        type: choice
-        options:
-          - prod
-          - dev
-
-      select:
-        description: 'Seletor de modelos dbt (ex: +fct_order_items)'
-        required: false
-        default: ''
-
-      full_refresh:
-        description: 'Executar com --full-refresh?'
-        required: false
-        default: false
-        type: boolean
 
 jobs:
-  dbt-deploy:
-    name: dbt Deploy to Databricks
+  deploy:
+    name: Deploy dbt to Databricks
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
+
+    defaults:
+      run:
+        working-directory: airflow_dbt/include/northwind_dbt
 
     steps:
 
-      # -----------------------------------------------------------------------
-      # 1. Checkout
-      # -----------------------------------------------------------------------
+      # ------------------------
+      # Checkout
+      # ------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # 2. Setup Python
-      # -----------------------------------------------------------------------
-      - name: Set up Python
+      # ------------------------
+      # Setup Python
+      # ------------------------
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: pip
 
-      # -----------------------------------------------------------------------
-      # 3. Instalar dbt-databricks
-      # -----------------------------------------------------------------------
-      - name: Install dbt-databricks
+      # ------------------------
+      # Install dbt
+      # ------------------------
+      - name: Install dbt
         run: |
-          pip install --upgrade pip
-          pip install dbt-databricks==1.8.*
+          python -m pip install --upgrade pip
+          pip install \
+            dbt-core==1.12.3 \
+            dbt-databricks==1.10.9
 
-      # -----------------------------------------------------------------------
-      # 4. Definir ambiente
-      # -----------------------------------------------------------------------
-      - name: Set deployment target
-        id: target
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET="${{ github.event.inputs.target }}"
-          elif [ "${{ github.ref_name }}" = "develop" ]; then
-            TARGET="dev"
-          else
-            TARGET="prod"
-          fi
+      # ------------------------
+      # Check dbt version
+      # ------------------------
+      - name: Check dbt version
+        run: dbt --version
 
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Deploy target: $TARGET"
-
-      # -----------------------------------------------------------------------
-      # 5. Gerar profiles.yml dinamicamente
-      # -----------------------------------------------------------------------
-      - name: Generate profiles.yml
-        shell: bash
+      # ------------------------
+      # Setup dbt profile
+      # ------------------------
+      - name: Configure dbt profile
         run: |
           mkdir -p ~/.dbt
 
-          cat > ~/.dbt/profiles.yml << EOF
+          cat > ~/.dbt/profiles.yml <<EOF
           northwind_dbt:
-            target: ${{ steps.target.outputs.target }}
+            target: prod
             outputs:
-              dev:
-                type: databricks
-                host: ${{ secrets.DATABRICKS_HOST }}
-                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
-                token: ${{ secrets.DATABRICKS_TOKEN }}
-                catalog: ${{ secrets.DATABRICKS_CATALOG }}
-                schema: bronze
-                threads: 8
-
               prod:
                 type: databricks
                 host: ${{ secrets.DATABRICKS_HOST }}
@@ -132,86 +75,29 @@ jobs:
                 token: ${{ secrets.DATABRICKS_TOKEN }}
                 catalog: ${{ secrets.DATABRICKS_CATALOG }}
                 schema: bronze
-                threads: 8
+                threads: 4
           EOF
 
-      # -----------------------------------------------------------------------
-      # 6. dbt deps
-      # -----------------------------------------------------------------------
-      - name: dbt deps
+      # ------------------------
+      # Install dbt packages
+      # ------------------------
+      - name: Install dbt packages
         run: dbt deps
-        working-directory: airflow_dbt/include/northwind_dbt
 
-      # -----------------------------------------------------------------------
-      # 7. dbt parse
-      # -----------------------------------------------------------------------
-      - name: dbt parse
-        run: dbt parse --target ${{ steps.target.outputs.target }}
-        working-directory: airflow_dbt/include/northwind_dbt
+      # ------------------------
+      # Validate dbt project
+      # ------------------------
+      - name: Validate dbt project
+        run: dbt parse
 
-      # -----------------------------------------------------------------------
-      # 8. dbt seed
-      # -----------------------------------------------------------------------
-      - name: dbt seed
-        run: dbt seed --target ${{ steps.target.outputs.target }}
-        working-directory: airflow_dbt/include/northwind_dbt
+      # ------------------------
+      # Compile dbt project
+      # ------------------------
+      - name: Compile dbt project
+        run: dbt compile
 
-      # -----------------------------------------------------------------------
-      # 9. dbt snapshot
-      # -----------------------------------------------------------------------
-      - name: dbt snapshot
-        run: dbt snapshot --target ${{ steps.target.outputs.target }}
-        working-directory: airflow_dbt/include/northwind_dbt
-
-      # -----------------------------------------------------------------------
-      # 10. dbt run
-      # -----------------------------------------------------------------------
-      - name: dbt run
-        shell: bash
-        run: |
-          SELECT="${{ github.event.inputs.select }}"
-          FULL_REFRESH="${{ github.event.inputs.full_refresh }}"
-          TARGET="${{ steps.target.outputs.target }}"
-
-          CMD="dbt run --target $TARGET"
-
-          if [ -n "$SELECT" ]; then
-            CMD="$CMD --select $SELECT"
-          fi
-
-          if [ "$FULL_REFRESH" = "true" ]; then
-            CMD="$CMD --full-refresh"
-          fi
-
-          echo "Executing: $CMD"
-          eval "$CMD"
-        working-directory: airflow_dbt/include/northwind_dbt
-
-      # -----------------------------------------------------------------------
-      # 11. dbt test
-      # -----------------------------------------------------------------------
-      - name: dbt test
-        run: dbt test --target ${{ steps.target.outputs.target }}
-        working-directory: airflow_dbt/include/northwind_dbt
-
-      # -----------------------------------------------------------------------
-      # 12. Upload manifest
-      # -----------------------------------------------------------------------
-      - name: Upload dbt manifest
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: dbt-manifest-${{ steps.target.outputs.target }}-${{ github.sha }}
-          path: airflow_dbt/include/northwind_dbt/target/manifest.json
-          retention-days: 30
-
-      # -----------------------------------------------------------------------
-      # 13. Notificação de falha
-      # -----------------------------------------------------------------------
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "Deploy failed."
-          echo "Environment: ${{ steps.target.outputs.target }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      # ------------------------
+      # Run dbt build
+      # ------------------------
+      - name: Run dbt test
+        run: dbt test

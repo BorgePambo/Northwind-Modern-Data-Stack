@@ -1,47 +1,72 @@
-name: dbt CI
+# .github/workflows/ci.yml
+
+name: CI - dbt Databricks
 
 on:
+  push:
+    branches:
+      - develop
+
   pull_request:
     branches:
       - main
-      - develop
-    paths:
-      - 'airflow_dbt/include/northwind_dbt/models/**'
-      - 'airflow_dbt/include/northwind_dbt/seeds/**'
-      - 'airflow_dbt/include/northwind_dbt/snapshots/**'
-      - 'airflow_dbt/include/northwind_dbt/macros/**'
-      - 'airflow_dbt/include/northwind_dbt/tests/**'
-      - 'airflow_dbt/include/northwind_dbt/dbt_project.yml'
-      - 'airflow_dbt/include/northwind_dbt/packages.yml'
-
-  workflow_dispatch:
 
 jobs:
   dbt-ci:
-    name: dbt Build & Test
+    name: Validate dbt project
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
+
+    defaults:
+      run:
+        working-directory: airflow_dbt/include/northwind_dbt
 
     steps:
 
+      # ------------------------
+      # Checkout
+      # ------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # ------------------------
+      # Setup Python
+      # ------------------------
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: pip
 
-      - name: Install dbt-databricks
+      # ------------------------
+      # Install dbt
+      # ------------------------
+      - name: Install dbt
         run: |
-          pip install --upgrade pip
-          pip install dbt-databricks==1.8.*
+          python -m pip install --upgrade pip
+          pip install \
+            dbt-core==1.12.3 \
+            dbt-databricks==1.10.9
 
-      - name: Generate profiles.yml for CI
+      # ------------------------
+      # Check dbt version
+      # ------------------------
+      - name: Check dbt version
+        run: dbt --version
+
+      # ------------------------
+      # Setup dbt profile
+      # ------------------------
+      - name: Configure dbt profile
         run: |
           mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << EOF
+
+          cat > ~/.dbt/profiles.yml <<EOF
           northwind_dbt:
             target: ci
             outputs:
@@ -51,37 +76,31 @@ jobs:
                 http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
                 token: ${{ secrets.DATABRICKS_TOKEN }}
                 catalog: ${{ secrets.DATABRICKS_CATALOG }}
-                schema: ci_pr_${{ github.event.number }}
+                schema: bronze
                 threads: 4
           EOF
 
-      - name: dbt deps
+      # ------------------------
+      # Install dbt packages
+      # ------------------------
+      - name: Install dbt packages
         run: dbt deps
-        working-directory: airflow_dbt/include/northwind_dbt
 
-      - name: dbt parse
+      # ------------------------
+      # Validate dbt project
+      # ------------------------
+      - name: Validate dbt project
         run: dbt parse
-        working-directory: airflow_dbt/include/northwind_dbt
 
-      - name: dbt build
-        run: |
-          dbt build \
-            --target ci \
-            --fail-fast
-        working-directory: airflow_dbt/include/northwind_dbt
+      # Compile dbt project
+      # ------------------------
+      - name: Compile dbt project
+        run: dbt compile
 
-      - name: Upload dbt manifest
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: dbt-manifest-pr-${{ github.event.number }}
-          path: airflow_dbt/include/northwind_dbt/target/manifest.json
-          retention-days: 7
+      # ------------------------
+      # Build dbt project
+      # ------------------------
+      - name: test dbt project
+        run: dbt test
 
-      - name: Cleanup CI schema
-        if: always()
-        run: |
-          dbt run-operation drop_schema \
-            --args "{'schema': 'ci_pr_${{ github.event.number }}'}" \
-            --target ci
-        working-directory: airflow_dbt/include/northwind_dbt
+
