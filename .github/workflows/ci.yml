@@ -1,4 +1,3 @@
-```yaml
 # .github/workflows/ci.yml
 
 name: CI - dbt Databricks
